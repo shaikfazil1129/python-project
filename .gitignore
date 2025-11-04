@@ -1,0 +1,40 @@
+# Byte-compiled files
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Dependency directories (if using a package manager)
+Pipfile.lock
+*.egg-info/
+
+# IDE files (if applicable)
+.vscode/
+.idea/
+
+# OS-specific files
+.DS_Store      # macOS
+Thumbs.db      # Windows
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Environment variables
+.env
+
+# Log files
+*.log
+
+# pytest
+.cache/
+
+# Package distribution and documentation
+*.tar.gz
+*.egg
+
+# Ignore installed packages (if installed locally)
+lib/
