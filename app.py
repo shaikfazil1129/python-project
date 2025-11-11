@@ -24,8 +24,40 @@ def run_comparison():
         messagebox.showerror("Error", "Please select valid folders.")
         return failed_files_count
     # Excel files
-    files1_xlsx = {extract_batch(f): os.path.join(src1, f) for f in os.listdir(src1) if f.endswith('.xlsx') and extract_batch(f)}
-    files2_xlsx = {extract_batch(f): os.path.join(src2, f) for f in os.listdir(src2) if f.endswith('.xlsx') and extract_batch(f)}
+    # Safe directory listing (handles permission errors / unreadable dirs)
+    try:
+        list_src1 = os.listdir(src1)
+    except Exception as e:
+        logging.error(f"Failed to list directory {src1}: {e}")
+        messagebox.showerror("Error", f"Cannot read source folder 1: {src1}\nSee log for details.")
+        failed_files_count += 1
+        return failed_files_count
+
+    try:
+        list_src2 = os.listdir(src2)
+    except Exception as e:
+        logging.error(f"Failed to list directory {src2}: {e}")
+        messagebox.showerror("Error", f"Cannot read source folder 2: {src2}\nSee log for details.")
+        failed_files_count += 1
+        return failed_files_count
+
+    # Build file maps with case-insensitive extension checks and skip invalid batch names
+    files1_xlsx = {}
+    for f in list_src1:
+        if not f.lower().endswith('.xlsx'):
+            continue
+        batch = extract_batch(f)
+        if batch:
+            files1_xlsx[batch] = os.path.join(src1, f)
+
+    files2_xlsx = {}
+    for f in list_src2:
+        if not f.lower().endswith('.xlsx'):
+            continue
+        batch = extract_batch(f)
+        if batch:
+            files2_xlsx[batch] = os.path.join(src2, f)
+
     common_batches_xlsx = set(files1_xlsx.keys()) & set(files2_xlsx.keys())
     # --- Log unmatched Excel files ---
     unmatched_xlsx_src1 = set(files1_xlsx.keys()) - common_batches_xlsx
@@ -41,9 +73,23 @@ def run_comparison():
         failed_files_count += 1
 
     file_pairs_xlsx = [(files1_xlsx[batch], files2_xlsx[batch], batch) for batch in common_batches_xlsx]
-    # PDF files
-    files1_pdf = {extract_batch(f): os.path.join(src1, f) for f in os.listdir(src1) if f.endswith('.pdf') and extract_batch(f)}
-    files2_pdf = {extract_batch(f): os.path.join(src2, f) for f in os.listdir(src2) if f.endswith('.pdf') and extract_batch(f)}
+    # Same approach for PDFs
+    files1_pdf = {}
+    for f in list_src1:
+        if not f.lower().endswith('.pdf'):
+            continue
+        batch = extract_batch(f)
+        if batch:
+            files1_pdf[batch] = os.path.join(src1, f)
+
+    files2_pdf = {}
+    for f in list_src2:
+        if not f.lower().endswith('.pdf'):
+            continue
+        batch = extract_batch(f)
+        if batch:
+            files2_pdf[batch] = os.path.join(src2, f)
+
     common_batches_pdf = set(files1_pdf.keys()) & set(files2_pdf.keys())
 
     # --- Log unmatched PDF files ---
@@ -62,19 +108,35 @@ def run_comparison():
     file_pairs_pdf = [(files1_pdf[batch], files2_pdf[batch], batch) for batch in common_batches_pdf]
     if not file_pairs_xlsx and not file_pairs_pdf:
         messagebox.showinfo("Info", "No matching batch files found.")
-        return
+        return failed_files_count
     if file_pairs_xlsx:
-        compare_excel_files(file_pairs_xlsx, target, failed_files_count)
+        failed_files_count += compare_excel_files(file_pairs_xlsx, target)
     if file_pairs_pdf:
-        compare_pdf_files(file_pairs_pdf, target, failed_files_count)
+        failed_files_count += compare_pdf_files(file_pairs_pdf, target)
     return failed_files_count
 
-def animate_spinner(frame_index=0):
+def animate_spinner(frame_index=0, text_index=0):
     if not spinner_running:
         return
-    spinner_label.configure(image=spinner_frames[frame_index])
-    next_index = (frame_index + 1) % len(spinner_frames)
-    root.after(100, animate_spinner, next_index)  # adjust 100ms for speed
+    # Mode 1: animated GIF frames available
+    if spinner_frames:  # list of PhotoImage frames (maybe empty)
+        try:
+            frame = spinner_frames[frame_index]
+            spinner_label.configure(image=frame, text="")  # ensure text cleared
+            spinner_label.image = frame  # keep ref to avoid GC
+        except Exception as e:
+            logging.warning(f"Failed to set spinner image frame: {e}")
+
+        next_index = (frame_index + 1) % len(spinner_frames)
+        root.after(100, animate_spinner, next_index, 0)  # 100ms per frame
+
+    # Mode 2: no frames -> text fallback animation (ellipsis)
+    else:
+        dots = ["", ".", "..", "..."]
+        spinner_label.configure(text=f"Processing{dots[text_index]}")
+        next_text_index = (text_index + 1) % len(dots)
+        # slower cadence for text
+        root.after(400, animate_spinner, 0, next_text_index)
 
 def run_comparison_threaded():
     global spinner_running
@@ -86,42 +148,64 @@ def run_comparison_threaded():
     root.update()
 
     def task():
-        failed_count = run_comparison()  # run_comparison now returns failure count
+        # Heavy work runs in background thread
+        failed_count = run_comparison()  # returns int
 
-        global spinner_running
-        spinner_running = False
-        spinner_label.grid_remove()
-        run_button.grid()
+        # Define a function that runs on the main thread to update UI
+        def on_complete(fc):
+            global spinner_running
+            spinner_running = False
+            spinner_label.grid_remove()
+            run_button.grid()
 
-        # Show appropriate message
-        target = target_entry.get()
-        if failed_count > 0:
-            messagebox.showwarning("Completed with Errors",
-                                   f"Count of files: {failed_count} failed to compare. Please check logs. Remaining results saved in {target}.")
-        else:
-            messagebox.showinfo("Completed",
-                                f"Completed the comparisons. Results saved in {target}.")
+            # show messageboxes from main thread (safe)
+            target = target_entry.get()
+            if fc > 0:
+                messagebox.showwarning(
+                    "Completed with Errors",
+                    f"Count of files: {fc} failed to compare. Please check logs. Remaining results saved in {target}."
+                )
+            else:
+                messagebox.showinfo(
+                    "Completed",
+                    f"Completed the comparisons. Results saved in {target}."
+                )
+
+        # Schedule the UI update to run on the main thread as soon as possible
+        root.after(0, on_complete, failed_count)
 
     threading.Thread(target=task).start()
 
 root = tk.Tk()
 root.title("Excel Batch Comparison")
 
-# --- Spinner setup ---
+# --- Spinner setup (robust to missing/corrupt spinner.gif) ---
 spinner_frames = []
-spinner_image = tk.PhotoImage(file="spinner.gif", format="gif -index 0")
-spinner_frames.append(spinner_image)
+spinner_path = "spinner.gif"
 
-i = 1
-while True:
+if os.path.exists(spinner_path):
     try:
-        frame = tk.PhotoImage(file="spinner.gif", format=f"gif -index {i}")
-        spinner_frames.append(frame)
-        i += 1
-    except tk.TclError:
-        break
+        # Attempt to load all frames from the GIF
+        i = 0
+        while True:
+            try:
+                frame = tk.PhotoImage(file=spinner_path, format=f"gif -index {i}")
+                spinner_frames.append(frame)
+                i += 1
+            except tk.TclError:
+                break
+    except Exception as e:
+        logging.warning(f"Failed to load spinner.gif frames: {e}")
+        spinner_frames = []
+else:
+    logging.warning("spinner.gif not found; using text fallback for progress indicator.")
 
-spinner_label = tk.Label(root, image=spinner_frames[0])
+# If no frames were loaded, use a safe text fallback label
+if spinner_frames:
+    spinner_label = tk.Label(root, image=spinner_frames[0])
+else:
+    spinner_label = tk.Label(root, text="Processing...", font=("Arial", 10, "italic"))
+
 spinner_label.grid(row=3, column=1, pady=10)
 spinner_label.grid_remove()  # hide initially
 spinner_running = False  # control flag for animation

@@ -3,9 +3,11 @@ import pandas as pd
 import logging
 import openpyxl
 from openpyxl.styles import PatternFill, Font
-from .utils import sha256_of_file
+from .utils import sha256_of_file, delete_if_exists
 
-def compare_excel_files(file_pairs, target_folder, failed_files_count):
+
+def compare_excel_files(file_pairs, target_folder):
+    failed_files_count = 0
     for fileA, fileB, batch in file_pairs:
         logging.info(f"Comparing batch: {batch} | FileA: {fileA} | FileB: {fileB}")
         sha_A = sha256_of_file(fileA)
@@ -19,6 +21,7 @@ def compare_excel_files(file_pairs, target_folder, failed_files_count):
 
         base_name = f"comparison-{batch}.xlsx"
         outputFile = os.path.join(target_folder, base_name)
+        delete_if_exists(outputFile)
 
         # --- Read both Excel files once ---
         try:
@@ -116,18 +119,29 @@ def compare_excel_files(file_pairs, target_folder, failed_files_count):
 
         # --- Apply highlights once per file ---
         if sheet_diff_map:
-            wb = openpyxl.load_workbook(outputFile)
-            for sheet_name, sheet_info in sheet_diff_map.items():
-                ws = wb[sheet_name]
-                headers = sheet_info['Headers']
-                cell_differences = sheet_info['CellDifferences']
-                col_map = {header: idx + 1 for idx, header in enumerate(headers)}
-                for row_index, cols_changed in cell_differences.items():
-                    for col_name in cols_changed:
-                        excel_row = row_index + 2
-                        excel_col = col_map[col_name]
-                        cell = ws.cell(row=excel_row, column=excel_col)
-                        cell.fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-                        cell.font = Font(bold=True)
-            wb.save(outputFile)
-            logging.info(f"Highlighted differences in {outputFile}")
+            try:
+                wb = openpyxl.load_workbook(outputFile)
+            except Exception as e:
+                logging.error(f"Could not open output workbook for highlighting: {outputFile}. Error: {e}")
+                # mark this pair as failed and continue to next file pair
+                failed_files_count += 1
+            else:
+                for sheet_name, sheet_info in sheet_diff_map.items():
+                    ws = wb[sheet_name]
+                    headers = sheet_info['Headers']
+                    cell_differences = sheet_info['CellDifferences']
+                    col_map = {header: idx + 1 for idx, header in enumerate(headers)}
+                    for row_index, cols_changed in cell_differences.items():
+                        for col_name in cols_changed:
+                            excel_row = row_index + 2
+                            excel_col = col_map[col_name]
+                            cell = ws.cell(row=excel_row, column=excel_col)
+                            cell.fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+                            cell.font = Font(bold=True)
+                try:
+                    wb.save(outputFile)
+                    logging.info(f"Highlighted differences in {outputFile}")
+                except Exception as e:
+                    logging.error(f"Failed to save highlighted workbook {outputFile}: {e}")
+                    failed_files_count += 1
+    return failed_files_count

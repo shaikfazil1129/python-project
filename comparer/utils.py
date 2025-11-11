@@ -15,6 +15,15 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+def delete_if_exists(filepath):
+    """Delete the file at 'filepath' if it already exists."""
+    try:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            logging.info(f"Existing file deleted: {filepath}")
+    except Exception as e:
+        logging.error(f"Failed to delete existing file {filepath}: {e}")
+
 def extract_batch(filename):
     match = re.search(r'(\d{3}-\d{3}-\d{2}-\d{3})', filename)
     if match:
