@@ -15,6 +15,26 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+def find_files(root_dir, extension):
+    """
+    Recursively finds all files with a given extension and returns a map of
+    {relative_path: full_path}.
+    """
+    file_map = {}
+    for dirpath, _, filenames in os.walk(root_dir):
+        # Skip empty directories
+        if not filenames:
+            continue
+
+        for filename in filenames:
+            if filename.lower().endswith(extension):
+                full_path = os.path.join(dirpath, filename)
+                # This relative_path is the new "key"
+                # e.g., "7021\report-1.xlsx"
+                relative_path = os.path.relpath(full_path, root_dir)
+                file_map[relative_path] = full_path
+    return file_map
+
 def delete_if_exists(filepath):
     """Delete the file at 'filepath' if it already exists."""
     try:

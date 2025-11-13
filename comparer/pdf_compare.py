@@ -1,11 +1,12 @@
 import os
 import fitz
 import logging
-from .utils import sha256_of_file
+from .utils import sha256_of_file, delete_if_exists
+
 
 def compare_pdf_files(file_pairs, target_folder):
     failed_files_count = 0
-    for fileA, fileB, batch in file_pairs:
+    for fileA, fileB, batch, rel_path in file_pairs:
         try:
             logging.info(f"Comparing PDF batch: {batch} | FileA: {fileA} | FileB: {fileB}")
             sha_A = sha256_of_file(fileA)
@@ -77,7 +78,20 @@ def compare_pdf_files(file_pairs, target_folder):
                     except Exception as e:
                         logging.error(f"Failed to add summary page: {e}")
 
-                outputFile = os.path.join(target_folder, f"comparison-{batch}.pdf")
+                # --- NEW: Create nested output directory ---
+                try:
+                    rel_dir = os.path.dirname(rel_path)
+                    output_dir = os.path.join(target_folder, rel_dir)
+                    os.makedirs(output_dir, exist_ok=True)
+
+                    base_name = f"comparison-{batch}.pdf"
+                    outputFile = os.path.join(output_dir, base_name)
+                except Exception as e:
+                    logging.error(f"Failed to create output directory for {rel_path}: {e}")
+                    failed_files_count += 1
+                    continue  # Skip this file pair
+                # --- END NEW ---
+                delete_if_exists(outputFile)
                 try:
                     docB.save(outputFile)
                     logging.info(f"Written PDF differences to {outputFile}")

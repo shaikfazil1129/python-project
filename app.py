@@ -2,7 +2,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import threading
-from comparer.utils import extract_batch, logging
+from comparer.utils import extract_batch, logging, find_files
 from comparer.excel_compare import compare_excel_files
 from comparer.pdf_compare import compare_pdf_files
 # rest of your GUI and run_comparison logic — unchanged
@@ -26,7 +26,7 @@ def run_comparison():
     # Excel files
     # Safe directory listing (handles permission errors / unreadable dirs)
     try:
-        list_src1 = os.listdir(src1)
+        files1_xlsx_map = find_files(src1, '.xlsx')
     except Exception as e:
         logging.error(f"Failed to list directory {src1}: {e}")
         messagebox.showerror("Error", f"Cannot read source folder 1: {src1}\nSee log for details.")
@@ -34,78 +34,74 @@ def run_comparison():
         return failed_files_count
 
     try:
-        list_src2 = os.listdir(src2)
+        files2_xlsx_map = find_files(src2, '.xlsx')
     except Exception as e:
         logging.error(f"Failed to list directory {src2}: {e}")
         messagebox.showerror("Error", f"Cannot read source folder 2: {src2}\nSee log for details.")
         failed_files_count += 1
         return failed_files_count
 
-    # Build file maps with case-insensitive extension checks and skip invalid batch names
-    files1_xlsx = {}
-    for f in list_src1:
-        if not f.lower().endswith('.xlsx'):
-            continue
-        batch = extract_batch(f)
-        if batch:
-            files1_xlsx[batch] = os.path.join(src1, f)
+    common_xlsx_paths = set(files1_xlsx_map.keys()) & set(files2_xlsx_map.keys())
 
-    files2_xlsx = {}
-    for f in list_src2:
-        if not f.lower().endswith('.xlsx'):
-            continue
-        batch = extract_batch(f)
-        if batch:
-            files2_xlsx[batch] = os.path.join(src2, f)
-
-    common_batches_xlsx = set(files1_xlsx.keys()) & set(files2_xlsx.keys())
     # --- Log unmatched Excel files ---
-    unmatched_xlsx_src1 = set(files1_xlsx.keys()) - common_batches_xlsx
-    unmatched_xlsx_src2 = set(files2_xlsx.keys()) - common_batches_xlsx
+    unmatched_xlsx_src1 = set(files1_xlsx_map.keys()) - common_xlsx_paths
+    unmatched_xlsx_src2 = set(files2_xlsx_map.keys()) - common_xlsx_paths
 
-    for batch in unmatched_xlsx_src1:
+    for rel_path in unmatched_xlsx_src1:
         logging.info(
-            f"{os.path.basename(src1)} - File '{os.path.basename(files1_xlsx[batch])}' is not compared due to missing or inconsistent batch name in FolderB")
+            f"{os.path.basename(src1)} - File '{rel_path}' is not compared due to missing file in FolderB")
         failed_files_count += 1
-    for batch in unmatched_xlsx_src2:
+    for rel_path in unmatched_xlsx_src2:
         logging.info(
-            f"{os.path.basename(src2)} - File '{os.path.basename(files2_xlsx[batch])}' is not compared due to missing or inconsistent batch name in FolderA")
+            f"{os.path.basename(src2)} - File '{rel_path}' is not compared due to missing file in FolderA")
         failed_files_count += 1
 
-    file_pairs_xlsx = [(files1_xlsx[batch], files2_xlsx[batch], batch) for batch in common_batches_xlsx]
-    # Same approach for PDFs
-    files1_pdf = {}
-    for f in list_src1:
-        if not f.lower().endswith('.pdf'):
-            continue
-        batch = extract_batch(f)
+    # --- Build Excel File Pairs ---
+    file_pairs_xlsx = []
+    for rel_path in common_xlsx_paths:
+        fileA = files1_xlsx_map[rel_path]
+        fileB = files2_xlsx_map[rel_path]
+        # Get batch from the filename part of the relative path
+        batch = extract_batch(os.path.basename(rel_path))
         if batch:
-            files1_pdf[batch] = os.path.join(src1, f)
+            # We must pass the rel_path to the compare function
+            file_pairs_xlsx.append((fileA, fileB, batch, rel_path))
+        else:
+            logging.warning(f"Could not extract batch from {rel_path}. Skipping.")
+            failed_files_count += 1
 
-    files2_pdf = {}
-    for f in list_src2:
-        if not f.lower().endswith('.pdf'):
-            continue
-        batch = extract_batch(f)
-        if batch:
-            files2_pdf[batch] = os.path.join(src2, f)
+    # PDF files
+    files1_pdf_map = find_files(src1, '.pdf')
+    files2_pdf_map = find_files(src2, '.pdf')
 
-    common_batches_pdf = set(files1_pdf.keys()) & set(files2_pdf.keys())
+    common_pdf_paths = set(files1_pdf_map.keys()) & set(files2_pdf_map.keys())
 
     # --- Log unmatched PDF files ---
-    unmatched_pdf_src1 = set(files1_pdf.keys()) - common_batches_pdf
-    unmatched_pdf_src2 = set(files2_pdf.keys()) - common_batches_pdf
+    unmatched_pdf_src1 = set(files1_pdf_map.keys()) - common_pdf_paths
+    unmatched_pdf_src2 = set(files2_pdf_map.keys()) - common_pdf_paths
 
-    for batch in unmatched_pdf_src1:
+    for rel_path in unmatched_pdf_src1:
         logging.info(
-            f"{os.path.basename(src1)} - File '{os.path.basename(files1_pdf[batch])}' is not compared due to missing or inconsistent batch name in FolderB")
+            f"{os.path.basename(src1)} - File '{rel_path}' is not compared due to missing file in FolderB")
         failed_files_count += 1
-    for batch in unmatched_pdf_src2:
+    for rel_path in unmatched_pdf_src2:
         logging.info(
-            f"{os.path.basename(src2)} - File '{os.path.basename(files2_pdf[batch])}' is not compared due to missing or inconsistent batch name in FolderA")
+            f"{os.path.basename(src2)} - File '{rel_path}' is not compared due to missing file in FolderA")
         failed_files_count += 1
 
-    file_pairs_pdf = [(files1_pdf[batch], files2_pdf[batch], batch) for batch in common_batches_pdf]
+    # --- Build PDF File Pairs ---
+    file_pairs_pdf = []
+    for rel_path in common_pdf_paths:
+        fileA = files1_pdf_map[rel_path]
+        fileB = files2_pdf_map[rel_path]
+        batch = extract_batch(os.path.basename(rel_path))
+        if batch:
+            # Pass rel_path for PDFs too
+            file_pairs_pdf.append((fileA, fileB, batch, rel_path))
+        else:
+            logging.warning(f"Could not extract batch from {rel_path}. Skipping.")
+            failed_files_count += 1
+
     if not file_pairs_xlsx and not file_pairs_pdf:
         messagebox.showinfo("Info", "No matching batch files found.")
         return failed_files_count

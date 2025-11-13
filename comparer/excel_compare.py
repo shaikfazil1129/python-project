@@ -8,7 +8,7 @@ from .utils import sha256_of_file, delete_if_exists
 
 def compare_excel_files(file_pairs, target_folder):
     failed_files_count = 0
-    for fileA, fileB, batch in file_pairs:
+    for fileA, fileB, batch, rel_path in file_pairs:
         logging.info(f"Comparing batch: {batch} | FileA: {fileA} | FileB: {fileB}")
         sha_A = sha256_of_file(fileA)
         sha_B = sha256_of_file(fileB)
@@ -19,8 +19,25 @@ def compare_excel_files(file_pairs, target_folder):
             logging.info(f"Skipping {fileA} and {fileB}: files are identical (SHA-256 match).")
             continue
 
-        base_name = f"comparison-{batch}.xlsx"
-        outputFile = os.path.join(target_folder, base_name)
+        # --- NEW: Create nested output directory ---
+        try:
+            # e.g., rel_path = "7021\report-1.xlsx" -> rel_dir = "7021"
+            rel_dir = os.path.dirname(rel_path)
+
+            # e.g., output_dir = "C:\Target\7021"
+            output_dir = os.path.join(target_folder, rel_dir)
+
+            # Create the folder if it doesn't exist
+            os.makedirs(output_dir, exist_ok=True)
+
+            # e.g., outputFile = "C:\Target\7021\comparison-1.xlsx"
+            base_name = f"comparison-{batch}.xlsx"
+            outputFile = os.path.join(output_dir, base_name)
+        except Exception as e:
+            logging.error(f"Failed to create output directory for {rel_path}: {e}")
+            failed_files_count += 1
+            continue  # Skip this file pair
+        # --- END NEW ---
         delete_if_exists(outputFile)
 
         # --- Read both Excel files once ---
